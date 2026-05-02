@@ -1,6 +1,12 @@
-import { and, eq, ne } from "drizzle-orm";
+import { and, eq, ne, sql } from "drizzle-orm";
 import { db } from "@/db";
-import { plaudConnections, recordings, userSettings, users } from "@/db/schema";
+import {
+    plaudConnections,
+    plaudFolders,
+    recordings,
+    userSettings,
+    users,
+} from "@/db/schema";
 import { env } from "@/lib/env";
 import { sendNewRecordingBarkNotification } from "@/lib/notifications/bark";
 import { sendNewRecordingEmail } from "@/lib/notifications/email";
@@ -145,6 +151,7 @@ async function processRecording(
             zonemins: plaudRecording.zonemins,
             scene: plaudRecording.scene,
             isTrash: plaudRecording.is_trash,
+            folderIds: plaudRecording.filetag_id_list ?? [],
         };
 
         if (existingRecording) {
@@ -294,6 +301,46 @@ export async function syncRecordingsForUser(
         );
         const storage = await createUserStorageProvider(userId);
         const allNewRecordingNames: string[] = [];
+
+        // Refresh local folder cache once per sync. Best-effort: a Plaud
+        // outage on /filetag/ should not abort the whole sync. The cache
+        // is only used to display folder names; absence falls back to
+        // showing IDs. See plaud_folders table.
+        try {
+            const folderResp = await plaudClient.listFolders();
+            const folders = folderResp.data_filetag_list;
+            if (folders.length > 0) {
+                await db
+                    .insert(plaudFolders)
+                    .values(
+                        folders.map((f) => ({
+                            userId,
+                            plaudFolderId: f.id,
+                            name: f.name,
+                            icon: f.icon,
+                            color: f.color,
+                            updatedAt: new Date(),
+                        })),
+                    )
+                    .onConflictDoUpdate({
+                        target: [
+                            plaudFolders.userId,
+                            plaudFolders.plaudFolderId,
+                        ],
+                        set: {
+                            name: sql`excluded.name`,
+                            icon: sql`excluded.icon`,
+                            color: sql`excluded.color`,
+                            updatedAt: new Date(),
+                        },
+                    });
+            }
+        } catch (error) {
+            console.warn(
+                "[sync] failed to refresh folder cache:",
+                error instanceof Error ? error.message : error,
+            );
+        }
 
         // Paginated sync - fetch newest first
         let page = 0;

@@ -157,6 +157,10 @@ export const recordings = pgTable(
         // from storage at delete time; this row is retained only as a marker
         // keyed by plaudFileId. See issue #56.
         deletedAt: timestamp("deleted_at"),
+        // Folder ("filetag") IDs from Plaud — a recording can belong to zero
+        // or more folders. Persisted at sync time (Plaud's `filetag_id_list`).
+        // Names live in `plaud_folders`, joined client-side or in export.
+        folderIds: text("folder_ids").array().notNull().default([]),
         createdAt: timestamp("created_at").notNull().defaultNow(),
         updatedAt: timestamp("updated_at").notNull().defaultNow(),
     },
@@ -172,6 +176,28 @@ export const recordings = pgTable(
             table.userId,
             table.startTime,
         ),
+    }),
+);
+
+// Plaud folders ("filetags") — cached locally so the UI can show names
+// (e.g. "Braskem") without hitting the Plaud API on every render.
+// Refreshed at sync time. Composite PK (userId, plaudFolderId) so we
+// don't accidentally serve another user's folder by id-collision.
+export const plaudFolders = pgTable(
+    "plaud_folders",
+    {
+        userId: text("user_id")
+            .notNull()
+            .references(() => users.id, { onDelete: "cascade" }),
+        plaudFolderId: varchar("plaud_folder_id", { length: 255 }).notNull(),
+        name: text("name").notNull(),
+        icon: varchar("icon", { length: 16 }),
+        color: varchar("color", { length: 16 }),
+        updatedAt: timestamp("updated_at").notNull().defaultNow(),
+    },
+    (table) => ({
+        userFolderUnique: unique().on(table.userId, table.plaudFolderId),
+        userIdIdx: index("plaud_folders_user_id_idx").on(table.userId),
     }),
 );
 
