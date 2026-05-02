@@ -138,7 +138,12 @@ export async function POST(
         const [existingTranscription] = await db
             .select()
             .from(transcriptions)
-            .where(eq(transcriptions.recordingId, id))
+            .where(
+                and(
+                    eq(transcriptions.recordingId, id),
+                    eq(transcriptions.userId, session.user.id),
+                ),
+            )
             .limit(1);
 
         if (existingTranscription) {
@@ -151,7 +156,12 @@ export async function POST(
                     provider: credentials.provider,
                     model,
                 })
-                .where(eq(transcriptions.id, existingTranscription.id));
+                .where(
+                    and(
+                        eq(transcriptions.id, existingTranscription.id),
+                        eq(transcriptions.userId, session.user.id),
+                    ),
+                );
         } else {
             await db.insert(transcriptions).values({
                 recordingId: id,

@@ -44,7 +44,12 @@ export async function GET(
         const [transcription] = await db
             .select()
             .from(transcriptions)
-            .where(eq(transcriptions.recordingId, id))
+            .where(
+                and(
+                    eq(transcriptions.recordingId, id),
+                    eq(transcriptions.userId, session.user.id),
+                ),
+            )
             .limit(1);
 
         return NextResponse.json({
