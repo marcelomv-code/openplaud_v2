@@ -69,7 +69,7 @@ OpenPlaud ships as a Docker image on GitHub Container Registry. You don't need t
 mkdir openplaud && cd openplaud
 
 curl -fLO https://github.com/openplaud/openplaud/releases/latest/download/docker-compose.yml
-curl -fL  https://github.com/openplaud/openplaud/releases/latest/download/.env.example -o .env
+curl -fL  https://github.com/openplaud/openplaud/releases/latest/download/env.example -o .env
 ```
 
 **2. Generate secrets and edit `.env`**
@@ -90,6 +90,11 @@ APP_URL=http://localhost:3000
 # Optional — pin a specific OpenPlaud version for reproducible deploys.
 # Leave as `latest` for newest stable, or use e.g. `0.1.0` / `dev`.
 OPENPLAUD_VERSION=latest
+
+# Optional — lock down sign-ups on a closed instance. When set, the
+# /register page is disabled and better-auth rejects new sign-ups
+# server-side. Existing users keep working. Defaults to false.
+# DISABLE_REGISTRATION=true
 ```
 
 **3. Start the application**

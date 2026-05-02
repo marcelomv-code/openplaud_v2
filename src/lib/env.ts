@@ -1,7 +1,7 @@
 import { type Env, parseEnv } from "./env-schema";
 
 export type { Env, RawEnvInput } from "./env-schema";
-export { parseEnv } from "./env-schema";
+export { envSchema, parseEnv } from "./env-schema";
 
 function validateEnv(): Env {
     if (typeof window !== "undefined") {
@@ -19,5 +19,4 @@ export const env = validateEnv();
  * True when running inside `next build` (phase-production-build).
  * Server-only — same load constraints as `env`.
  */
-export const isBuild =
-    process.env.NEXT_PHASE === "phase-production-build";
+export const isBuild = process.env.NEXT_PHASE === "phase-production-build";

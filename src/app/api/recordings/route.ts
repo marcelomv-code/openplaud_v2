@@ -1,4 +1,4 @@
-import { and, desc, eq, lt } from "drizzle-orm";
+import { and, desc, eq, isNull, lt } from "drizzle-orm";
 import { NextResponse } from "next/server";
 import { db } from "@/db";
 import { recordings } from "@/db/schema";
@@ -37,12 +37,13 @@ export async function GET(request: Request) {
         const limit = parseLimit(url.searchParams.get("limit"));
         const cursor = parseCursor(url.searchParams.get("cursor"));
 
+        const baseCondition = and(
+            eq(recordings.userId, session.user.id),
+            isNull(recordings.deletedAt),
+        );
         const condition = cursor
-            ? and(
-                  eq(recordings.userId, session.user.id),
-                  lt(recordings.startTime, cursor),
-              )
-            : eq(recordings.userId, session.user.id);
+            ? and(baseCondition, lt(recordings.startTime, cursor))
+            : baseCondition;
 
         const userRecordings = await db
             .select()

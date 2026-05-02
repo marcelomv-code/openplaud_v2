@@ -1,4 +1,4 @@
-import { and, eq } from "drizzle-orm";
+import { and, eq, isNull } from "drizzle-orm";
 import { OpenAI } from "openai";
 import { db } from "@/db";
 import {
@@ -10,7 +10,7 @@ import {
 } from "@/db/schema";
 import { generateTitleFromTranscription } from "@/lib/ai/generate-title";
 import { decrypt } from "@/lib/encryption";
-import { createPlaudClient } from "@/lib/plaud/client";
+import { createPlaudClient } from "@/lib/plaud/client-factory";
 import { createUserStorageProvider } from "@/lib/storage/factory";
 import {
     getResponseFormat,
@@ -29,6 +29,12 @@ export async function transcribeRecording(
                 and(
                     eq(recordings.id, recordingId),
                     eq(recordings.userId, userId),
+                    // Skip tombstoned recordings. Without this filter the
+                    // post-sync auto-transcribe path would happily upload the
+                    // audio for a recording the user just deleted, recreate
+                    // its transcription row, and (if syncTitleToPlaud is on)
+                    // even push a generated title back to Plaud. See PR #72.
+                    isNull(recordings.deletedAt),
                 ),
             )
             .limit(1);
@@ -115,6 +121,27 @@ export async function transcribeRecording(
         const { text: transcriptionText, detectedLanguage } =
             parseTranscriptionResponse(transcription, responseFormat);
 
+        // Re-check tombstone after the provider call. The user may have
+        // deleted the recording while we were waiting on the transcription
+        // API; abort before writing so we don't recreate child rows the
+        // DELETE handler has already cleaned up.
+        const [stillActive] = await db
+            .select({ deletedAt: recordings.deletedAt })
+            .from(recordings)
+            .where(
+                and(
+                    eq(recordings.id, recordingId),
+                    eq(recordings.userId, userId),
+                ),
+            )
+            .limit(1);
+        if (!stillActive || stillActive.deletedAt) {
+            return {
+                success: false,
+                error: "Recording was deleted before transcription finished",
+            };
+        }
+
         if (existingTranscription) {
             await db
                 .update(transcriptions)
@@ -166,11 +193,36 @@ export async function transcribeRecording(
                                 const plaudClient = await createPlaudClient(
                                     connection.bearerToken,
                                     connection.apiBase,
+                                    connection.workspaceId,
                                 );
                                 await plaudClient.updateFilename(
                                     recording.plaudFileId,
                                     generatedTitle,
                                 );
+                                // Backfill workspaceId if newly resolved.
+                                // Always scope user-owned UPDATEs by userId
+                                // even when filtering by id (per AGENTS.md).
+                                const resolved = plaudClient.workspaceId;
+                                if (
+                                    resolved &&
+                                    resolved !== connection.workspaceId
+                                ) {
+                                    await db
+                                        .update(plaudConnections)
+                                        .set({ workspaceId: resolved })
+                                        .where(
+                                            and(
+                                                eq(
+                                                    plaudConnections.id,
+                                                    connection.id,
+                                                ),
+                                                eq(
+                                                    plaudConnections.userId,
+                                                    userId,
+                                                ),
+                                            ),
+                                        );
+                                }
                             }
                         } catch (error) {
                             console.error(

@@ -82,6 +82,13 @@ export const plaudConnections = pgTable("plaud_connections", {
     // Email of the linked Plaud account (captured during OTP flow). Null for
     // legacy connections created via the bearer-token paste flow.
     plaudEmail: text("plaud_email"),
+    // Plaud workspace ID (e.g. ws_xxxxxxxxxxxx) used to mint short-lived
+    // workspace tokens (WT) from the long-lived user token (UT). The WT is
+    // required by recording endpoints (/file/simple/web, /device/list, ...)
+    // on regional servers; without it those endpoints return empty lists.
+    // Null for connections created before this column existed; resolved and
+    // persisted lazily on next sync.
+    workspaceId: text("workspace_id"),
     lastSync: timestamp("last_sync"),
     createdAt: timestamp("created_at").notNull().defaultNow(),
     updatedAt: timestamp("updated_at").notNull().defaultNow(),
@@ -144,6 +151,12 @@ export const recordings = pgTable(
         zonemins: integer("zonemins"),
         scene: integer("scene"),
         isTrash: boolean("is_trash").notNull().default(false),
+        // Soft-delete tombstone. Set when the user deletes a recording from
+        // OpenPlaud's UI. Sync skips tombstoned rows so re-syncing from Plaud
+        // does not resurrect deleted recordings. The audio file is hard-deleted
+        // from storage at delete time; this row is retained only as a marker
+        // keyed by plaudFileId. See issue #56.
+        deletedAt: timestamp("deleted_at"),
         createdAt: timestamp("created_at").notNull().defaultNow(),
         updatedAt: timestamp("updated_at").notNull().defaultNow(),
     },
@@ -335,6 +348,9 @@ export const userSettings = pgTable("user_settings", {
     titleGenerationPrompt: jsonb("title_generation_prompt"), // { preset: string, customPrompt?: string }
     // Summary prompt configuration
     summaryPrompt: jsonb("summary_prompt"), // { selectedPrompt: string, customPrompts: CustomPrompt[] }
+    // AI output language (applies to summaries and AI-generated titles).
+    // null or "auto" => match transcript language (default behavior).
+    aiOutputLanguage: text("ai_output_language"),
     createdAt: timestamp("created_at").notNull().defaultNow(),
     updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });
