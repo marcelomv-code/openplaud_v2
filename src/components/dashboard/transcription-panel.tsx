@@ -3,6 +3,7 @@
 import {
     ChevronDown,
     ChevronUp,
+    Download,
     FileText,
     Languages,
     ListChecks,
@@ -150,15 +151,59 @@ export function TranscriptionPanel({
                         </CardTitle>
                         <div className="flex items-center gap-2">
                             {transcription?.text && (
-                                <Button
-                                    onClick={onTranscribe}
-                                    size="sm"
-                                    variant="outline"
-                                    disabled={isTranscribing}
-                                >
-                                    <RefreshCw className="w-4 h-4 mr-2" />
-                                    Re-transcribe
-                                </Button>
+                                <>
+                                    <Button
+                                        onClick={async () => {
+                                            try {
+                                                const res = await fetch(
+                                                    `/api/recordings/${recording.id}/transcription?format=txt`,
+                                                );
+                                                if (!res.ok)
+                                                    throw new Error(
+                                                        `HTTP ${res.status}`,
+                                                    );
+                                                const blob = await res.blob();
+                                                const url =
+                                                    window.URL.createObjectURL(
+                                                        blob,
+                                                    );
+                                                const a =
+                                                    document.createElement("a");
+                                                a.href = url;
+                                                a.download =
+                                                    res.headers
+                                                        .get(
+                                                            "Content-Disposition",
+                                                        )
+                                                        ?.split("filename=")[1]
+                                                        ?.replace(/"/g, "") ||
+                                                    "transcript.txt";
+                                                document.body.appendChild(a);
+                                                a.click();
+                                                document.body.removeChild(a);
+                                                window.URL.revokeObjectURL(url);
+                                            } catch {
+                                                toast.error(
+                                                    "Failed to download transcript",
+                                                );
+                                            }
+                                        }}
+                                        size="sm"
+                                        variant="outline"
+                                    >
+                                        <Download className="w-4 h-4 mr-2" />
+                                        Download .txt
+                                    </Button>
+                                    <Button
+                                        onClick={onTranscribe}
+                                        size="sm"
+                                        variant="outline"
+                                        disabled={isTranscribing}
+                                    >
+                                        <RefreshCw className="w-4 h-4 mr-2" />
+                                        Re-transcribe
+                                    </Button>
+                                </>
                             )}
                             {!transcription?.text && !isTranscribing && (
                                 <Button

@@ -29,6 +29,7 @@ vi.mock("@/db", () => ({
 
 import { GET as exportGET } from "@/app/api/export/route";
 import { GET as recordingByIdGET } from "@/app/api/recordings/[id]/route";
+import { GET as recordingTranscriptionGET } from "@/app/api/recordings/[id]/transcription/route";
 import { GET as recordingsListGET } from "@/app/api/recordings/route";
 import { GET as providersListGET } from "@/app/api/settings/ai/providers/route";
 import { db } from "@/db";
@@ -270,6 +271,101 @@ describe("API routes — smoke", () => {
             expect(res.status).toBe(200);
             const body = await res.json();
             expect(body.transcription).toBeNull();
+        });
+    });
+
+    describe("GET /api/recordings/[id]/transcription", () => {
+        const params = (id: string) =>
+            ({ params: Promise.resolve({ id }) }) as {
+                params: Promise<{ id: string }>;
+            };
+
+        it("returns 401 when no session", async () => {
+            getSessionMock.mockResolvedValueOnce(null);
+            const res = await recordingTranscriptionGET(
+                fakeRequest(),
+                params("rec-1"),
+            );
+            expect(res.status).toBe(401);
+        });
+
+        it("returns 404 when the recording does not belong to the user", async () => {
+            getSessionMock.mockResolvedValueOnce(userA);
+            (db.select as Mock).mockReturnValueOnce(selectChain([]));
+            const res = await recordingTranscriptionGET(
+                fakeRequest(),
+                params("rec-x"),
+            );
+            expect(res.status).toBe(404);
+        });
+
+        it("returns 404 when the recording exists but no transcription is saved", async () => {
+            getSessionMock.mockResolvedValueOnce(userA);
+            (db.select as Mock)
+                .mockReturnValueOnce(
+                    selectChain([
+                        {
+                            id: "rec-1",
+                            userId: "user-A",
+                            filename: "Reunião.mp3",
+                            duration: 60_000,
+                            startTime: new Date("2026-04-29T12:00:00Z"),
+                        },
+                    ]),
+                )
+                .mockReturnValueOnce(selectChain([]));
+
+            const res = await recordingTranscriptionGET(
+                new Request(
+                    "https://openplaud.test/api/recordings/rec-1/transcription?format=txt",
+                ),
+                params("rec-1"),
+            );
+            expect(res.status).toBe(404);
+            const body = await res.json();
+            expect(body.error).toMatch(/No transcription/);
+        });
+
+        it("returns the transcription text as a .txt download", async () => {
+            getSessionMock.mockResolvedValueOnce(userA);
+            (db.select as Mock)
+                .mockReturnValueOnce(
+                    selectChain([
+                        {
+                            id: "rec-1",
+                            userId: "user-A",
+                            filename: "Reunião.mp3",
+                            duration: 60_000,
+                            startTime: new Date("2026-04-29T12:00:00Z"),
+                        },
+                    ]),
+                )
+                .mockReturnValueOnce(
+                    selectChain([
+                        {
+                            recordingId: "rec-1",
+                            userId: "user-A",
+                            text: "hello world",
+                            detectedLanguage: "en",
+                            provider: "openai",
+                            model: "whisper-1",
+                        },
+                    ]),
+                );
+
+            const res = await recordingTranscriptionGET(
+                new Request(
+                    "https://openplaud.test/api/recordings/rec-1/transcription?format=txt",
+                ),
+                params("rec-1"),
+            );
+
+            expect(res.status).toBe(200);
+            expect(res.headers.get("Content-Type")).toMatch(/text\/plain/);
+            const disposition = res.headers.get("Content-Disposition") ?? "";
+            expect(disposition).toContain("Reuni"); // accent-tolerant
+            expect(disposition).toMatch(/-transcript\.txt"$/);
+            expect(await res.text()).toBe("hello world");
         });
     });
 
