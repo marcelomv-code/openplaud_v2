@@ -6,12 +6,12 @@
     "license": "AGPL-3.0",
     "repository": {
         "type": "git",
-        "url": "https://github.com/openplaud/openplaud.git"
+        "url": "https://github.com/marcelomv-code/openplaud_v2.git"
     },
     "bugs": {
-        "url": "https://github.com/openplaud/openplaud/issues"
+        "url": "https://github.com/marcelomv-code/openplaud_v2/issues"
     },
-    "homepage": "https://github.com/openplaud/openplaud#readme",
+    "homepage": "https://github.com/marcelomv-code/openplaud_v2#readme",
     "keywords": [
         "plaud",
         "plaud-note",
