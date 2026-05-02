@@ -125,6 +125,66 @@ describe("PlaudClient", () => {
         });
     });
 
+    describe("listFolders", () => {
+        it("should make authenticated request to /filetag/ endpoint", async () => {
+            const mockResponse = {
+                status: 0,
+                msg: "success",
+                request_id: "",
+                data_filetag_total: 2,
+                data_filetag_list: [
+                    {
+                        id: "f7e3f2be937a362f3185b8d852536ac7",
+                        name: "Braskem",
+                        icon: "e637",
+                        color: "#46cf6c",
+                    },
+                    {
+                        id: "84ba7db50c21691545b88b068d2a7821",
+                        name: "Pessoal",
+                        icon: "e63b",
+                        color: "#46CF6C",
+                    },
+                ],
+            };
+
+            mockFetch.mockResolvedValueOnce({
+                ok: true,
+                json: () => Promise.resolve(mockResponse),
+            });
+
+            const result = await client.listFolders();
+
+            expect(fetch).toHaveBeenCalledWith(
+                `${DEFAULT_PLAUD_API_BASE}/filetag/`,
+                expect.objectContaining({
+                    headers: expect.objectContaining({
+                        Authorization: `Bearer ${mockBearerToken}`,
+                    }),
+                }),
+            );
+            expect(result.data_filetag_total).toBe(2);
+            expect(result.data_filetag_list[0].name).toBe("Braskem");
+        });
+
+        it("returns an empty list when the user has no folders", async () => {
+            mockFetch.mockResolvedValueOnce({
+                ok: true,
+                json: () =>
+                    Promise.resolve({
+                        status: 0,
+                        msg: "success",
+                        request_id: "",
+                        data_filetag_total: 0,
+                        data_filetag_list: [],
+                    }),
+            });
+
+            const result = await client.listFolders();
+            expect(result.data_filetag_list).toEqual([]);
+        });
+    });
+
     describe("getRecordings", () => {
         it("should make request with default parameters", async () => {
             const mockResponse = {

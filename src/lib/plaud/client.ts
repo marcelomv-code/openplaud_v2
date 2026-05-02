@@ -1,6 +1,7 @@
 import type {
     PlaudApiError,
     PlaudDeviceListResponse,
+    PlaudFolderListResponse,
     PlaudRecordingsResponse,
     PlaudTempUrlResponse,
 } from "@/types/plaud";
@@ -197,6 +198,15 @@ export class PlaudClient {
      */
     async listDevices(): Promise<PlaudDeviceListResponse> {
         return this.request<PlaudDeviceListResponse>("/device/list");
+    }
+
+    /**
+     * List all folders ("filetags") for the user. Each PlaudRecording's
+     * `filetag_id_list` references entries in this list. Folder grouping
+     * is what app.plaud.ai shows in its sidebar (Braskem, Pessoal, ...).
+     */
+    async listFolders(): Promise<PlaudFolderListResponse> {
+        return this.request<PlaudFolderListResponse>("/filetag/");
     }
 
     /**

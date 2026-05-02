@@ -111,3 +111,25 @@ export interface PlaudWorkspaceTokenResponse {
         role: string;
     };
 }
+
+/**
+ * Plaud "filetag" — appears in the web app sidebar as a Folder. Each
+ * recording's `filetag_id_list` points to zero or more of these. A folder
+ * has a name, an icon (Material-style hex codepoint), and a color hex.
+ *
+ * Endpoint: GET /filetag/ (requires WT, like other recording endpoints).
+ */
+export interface PlaudFolder {
+    id: string;
+    name: string;
+    icon: string;
+    color: string;
+}
+
+export interface PlaudFolderListResponse {
+    status: number;
+    msg: string;
+    request_id: string;
+    data_filetag_total: number;
+    data_filetag_list: PlaudFolder[];
+}
