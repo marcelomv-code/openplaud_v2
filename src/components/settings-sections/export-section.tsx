@@ -33,6 +33,13 @@ interface ExportSectionProps {
     onReRunOnboarding?: () => void;
 }
 
+interface PlaudFolderOption {
+    id: string;
+    name: string;
+}
+
+const ALL_FOLDERS = "__all__";
+
 export function ExportSection({ onReRunOnboarding }: ExportSectionProps) {
     const { isLoadingSettings, isSavingSettings, setIsLoadingSettings } =
         useSettings();
@@ -41,6 +48,8 @@ export function ExportSection({ onReRunOnboarding }: ExportSectionProps) {
     const [backupFrequency, setBackupFrequency] = useState<string | null>(null);
     const [isExporting, setIsExporting] = useState(false);
     const [isBackingUp, setIsBackingUp] = useState(false);
+    const [folders, setFolders] = useState<PlaudFolderOption[]>([]);
+    const [selectedFolderId, setSelectedFolderId] = useState(ALL_FOLDERS);
 
     useEffect(() => {
         const fetchSettings = async () => {
@@ -60,6 +69,24 @@ export function ExportSection({ onReRunOnboarding }: ExportSectionProps) {
         };
         fetchSettings();
     }, [setIsLoadingSettings]);
+
+    useEffect(() => {
+        // Best effort: if Plaud isn't connected yet (404) or the call fails,
+        // we leave the folder picker empty and the user just exports all.
+        const fetchFolders = async () => {
+            try {
+                const response = await fetch("/api/plaud/folders");
+                if (!response.ok) return;
+                const data = (await response.json()) as {
+                    folders: PlaudFolderOption[];
+                };
+                setFolders(data.folders ?? []);
+            } catch {
+                // silent: folder picker is an optional refinement
+            }
+        };
+        fetchFolders();
+    }, []);
 
     const handleExportBackupSettingChange = async (updates: {
         defaultExportFormat?: string;
@@ -111,9 +138,11 @@ export function ExportSection({ onReRunOnboarding }: ExportSectionProps) {
     const handleExport = async () => {
         setIsExporting(true);
         try {
-            const response = await fetch(
-                `/api/export?format=${defaultExportFormat}`,
-            );
+            const params = new URLSearchParams({ format: defaultExportFormat });
+            if (selectedFolderId !== ALL_FOLDERS) {
+                params.set("folderId", selectedFolderId);
+            }
+            const response = await fetch(`/api/export?${params.toString()}`);
             if (!response.ok) throw new Error("Export failed");
 
             const blob = await response.blob();
@@ -217,6 +246,46 @@ export function ExportSection({ onReRunOnboarding }: ExportSectionProps) {
                         </SelectContent>
                     </Select>
                 </div>
+
+                {folders.length > 0 && (
+                    <div className="space-y-2">
+                        <Label htmlFor="export-folder">Folder to export</Label>
+                        <Select
+                            value={selectedFolderId}
+                            onValueChange={setSelectedFolderId}
+                        >
+                            <SelectTrigger
+                                id="export-folder"
+                                className="w-full"
+                            >
+                                <SelectValue>
+                                    {selectedFolderId === ALL_FOLDERS
+                                        ? "All folders"
+                                        : (folders.find(
+                                              (f) => f.id === selectedFolderId,
+                                          )?.name ?? "All folders")}
+                                </SelectValue>
+                            </SelectTrigger>
+                            <SelectContent>
+                                <SelectItem value={ALL_FOLDERS}>
+                                    All folders
+                                </SelectItem>
+                                {folders.map((folder) => (
+                                    <SelectItem
+                                        key={folder.id}
+                                        value={folder.id}
+                                    >
+                                        {folder.name}
+                                    </SelectItem>
+                                ))}
+                            </SelectContent>
+                        </Select>
+                        <p className="text-xs text-muted-foreground">
+                            Filter the export to recordings tagged in a specific
+                            Plaud folder. "All folders" exports everything.
+                        </p>
+                    </div>
+                )}
 
                 <div className="flex items-center justify-between opacity-60">
                     <div className="space-y-0.5 flex-1">
@@ -335,7 +404,14 @@ export function ExportSection({ onReRunOnboarding }: ExportSectionProps) {
                             ) : (
                                 <>
                                     <Download className="w-4 h-4 mr-2" />
-                                    Export All
+                                    {selectedFolderId === ALL_FOLDERS
+                                        ? "Export All"
+                                        : `Export ${
+                                              folders.find(
+                                                  (f) =>
+                                                      f.id === selectedFolderId,
+                                              )?.name ?? "folder"
+                                          }`}
                                 </>
                             )}
                         </Button>

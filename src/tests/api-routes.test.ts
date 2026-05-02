@@ -27,6 +27,7 @@ vi.mock("@/db", () => ({
     },
 }));
 
+import { GET as exportGET } from "@/app/api/export/route";
 import { GET as recordingByIdGET } from "@/app/api/recordings/[id]/route";
 import { GET as recordingsListGET } from "@/app/api/recordings/route";
 import { GET as providersListGET } from "@/app/api/settings/ai/providers/route";
@@ -304,6 +305,65 @@ describe("API routes — smoke", () => {
             expect(body.providers).toHaveLength(1);
             expect(body.providers[0]).not.toHaveProperty("apiKey");
             expect(JSON.stringify(body)).not.toContain("apiKey");
+        });
+
+        it("returns 404 when filtering by a folder that does not belong to the user", async () => {
+            getSessionMock.mockResolvedValueOnce(userA);
+            // Route order: 1) settings 2) folder. We need both mocks; the
+            // folder lookup is the one that returns empty → 404.
+            (db.select as Mock)
+                .mockReturnValueOnce(selectChain([])) // settings
+                .mockReturnValueOnce(selectChain([])); // folder lookup (empty)
+
+            const res = await exportGET(
+                new Request(
+                    "https://openplaud.test/api/export?folderId=other-user-folder&format=txt",
+                ),
+            );
+
+            expect(res.status).toBe(404);
+            const body = await res.json();
+            expect(body.error).toBe("Folder not found");
+        });
+
+        it("uses the folder name in the download filename when filtered", async () => {
+            getSessionMock.mockResolvedValueOnce(userA);
+            // Route order: 1) settings 2) folder 3) recordings 4) transcriptions
+            (db.select as Mock)
+                .mockReturnValueOnce(selectChain([])) // settings
+                .mockReturnValueOnce(selectChain([{ name: "Braskem" }])) // folder
+                .mockReturnValueOnce(
+                    selectChain([
+                        {
+                            id: "rec-1",
+                            userId: "user-A",
+                            filename: "Reunião.mp3",
+                            duration: 60_000,
+                            startTime: new Date("2026-04-29T12:00:00Z"),
+                            filesize: 1234,
+                        },
+                    ]),
+                )
+                .mockReturnValueOnce(
+                    selectChain([
+                        {
+                            recordingId: "rec-1",
+                            userId: "user-A",
+                            text: "transcription text",
+                        },
+                    ]),
+                );
+
+            const res = await exportGET(
+                new Request(
+                    "https://openplaud.test/api/export?folderId=braskem-id&format=txt",
+                ),
+            );
+
+            expect(res.status).toBe(200);
+            const disposition = res.headers.get("Content-Disposition") ?? "";
+            expect(disposition).toContain("Braskem");
+            expect(disposition).toMatch(/\.txt"$/);
         });
 
         it("user A only sees their own providers (no leak across users)", async () => {

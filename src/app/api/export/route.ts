@@ -1,8 +1,25 @@
-import { and, eq, isNull } from "drizzle-orm";
+import { and, arrayContains, eq, isNull } from "drizzle-orm";
 import { NextResponse } from "next/server";
 import { db } from "@/db";
-import { recordings, transcriptions, userSettings } from "@/db/schema";
+import {
+    plaudFolders,
+    recordings,
+    transcriptions,
+    userSettings,
+} from "@/db/schema";
 import { auth } from "@/lib/auth";
+
+/**
+ * Sanitize a string for use in a download filename: strip path separators,
+ * collapse whitespace, trim. Keeps the export filename predictable when a
+ * folder name contains spaces or accents.
+ */
+function safeFilenamePart(input: string): string {
+    return input
+        .replace(/[/\\:*?"<>|]/g, "-")
+        .replace(/\s+/g, "-")
+        .trim();
+}
 
 // GET - Export recordings in specified format
 export async function GET(request: Request) {
@@ -20,6 +37,7 @@ export async function GET(request: Request) {
 
         const { searchParams } = new URL(request.url);
         const format = searchParams.get("format") || "json";
+        const folderId = searchParams.get("folderId");
 
         // Get user settings for default format
         const [settings] = await db
@@ -30,16 +48,46 @@ export async function GET(request: Request) {
 
         const exportFormat = format || settings?.defaultExportFormat || "json";
 
-        // Get all recordings for user
+        // If filtering by folder, verify the folder belongs to the user. This
+        // both prevents cross-user folder probing (defense in depth — folder
+        // IDs are random Plaud strings, not guessable, but we hold the line)
+        // and gives us the human-readable name for the download filename.
+        let folderName: string | null = null;
+        if (folderId) {
+            const [folder] = await db
+                .select({ name: plaudFolders.name })
+                .from(plaudFolders)
+                .where(
+                    and(
+                        eq(plaudFolders.userId, session.user.id),
+                        eq(plaudFolders.plaudFolderId, folderId),
+                    ),
+                )
+                .limit(1);
+            if (!folder) {
+                return NextResponse.json(
+                    { error: "Folder not found" },
+                    { status: 404 },
+                );
+            }
+            folderName = folder.name;
+        }
+
+        const baseCondition = and(
+            eq(recordings.userId, session.user.id),
+            isNull(recordings.deletedAt),
+        );
+        const recordingFilter = folderId
+            ? and(
+                  baseCondition,
+                  arrayContains(recordings.folderIds, [folderId]),
+              )
+            : baseCondition;
+
         const userRecordings = await db
             .select()
             .from(recordings)
-            .where(
-                and(
-                    eq(recordings.userId, session.user.id),
-                    isNull(recordings.deletedAt),
-                ),
-            );
+            .where(recordingFilter);
 
         // Get transcriptions for all recordings
         const recordingIds = userRecordings.map((r) => r.id);
@@ -60,6 +108,11 @@ export async function GET(request: Request) {
         let contentType: string;
         let filename: string;
 
+        const dateStamp = new Date().toISOString().split("T")[0];
+        const baseName = folderName
+            ? `recordings-${safeFilenamePart(folderName)}-${dateStamp}`
+            : `recordings-${dateStamp}`;
+
         switch (exportFormat) {
             case "json":
                 exportData = JSON.stringify(
@@ -76,7 +129,7 @@ export async function GET(request: Request) {
                     2,
                 );
                 contentType = "application/json";
-                filename = `recordings-${new Date().toISOString().split("T")[0]}.json`;
+                filename = `${baseName}.json`;
                 break;
 
             case "txt":
@@ -89,7 +142,7 @@ export async function GET(request: Request) {
                     })
                     .join("");
                 contentType = "text/plain";
-                filename = `recordings-${new Date().toISOString().split("T")[0]}.txt`;
+                filename = `${baseName}.txt`;
                 break;
 
             case "srt":
@@ -128,7 +181,7 @@ export async function GET(request: Request) {
                     .filter(Boolean)
                     .join("");
                 contentType = "text/plain";
-                filename = `recordings-${new Date().toISOString().split("T")[0]}.srt`;
+                filename = `${baseName}.srt`;
                 break;
 
             case "vtt":
@@ -167,7 +220,7 @@ export async function GET(request: Request) {
                     .filter(Boolean)
                     .join("")}`;
                 contentType = "text/vtt";
-                filename = `recordings-${new Date().toISOString().split("T")[0]}.vtt`;
+                filename = `${baseName}.vtt`;
                 break;
 
             default:
