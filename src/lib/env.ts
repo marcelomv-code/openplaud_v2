@@ -14,3 +14,10 @@ function validateEnv(): Env {
 }
 
 export const env = validateEnv();
+
+/**
+ * True when running inside `next build` (phase-production-build).
+ * Server-only — same load constraints as `env`.
+ */
+export const isBuild =
+    process.env.NEXT_PHASE === "phase-production-build";

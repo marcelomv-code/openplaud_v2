@@ -6,39 +6,37 @@
  * - NEXT_PUBLIC_MIN_SYNC_INTERVAL: Minimum time between syncs in milliseconds (default: 60000 = 1 minute)
  * - NEXT_PUBLIC_SYNC_ON_MOUNT: Whether to sync on app mount (default: true)
  * - NEXT_PUBLIC_SYNC_ON_VISIBILITY: Whether to sync when tab becomes visible (default: true)
+ *
+ * Values are read via the validated `publicEnv` surface to keep all env
+ * access centralized.
  */
+
+import { publicEnv } from "./public-env";
 
 export const SYNC_CONFIG = {
     /**
      * Default sync interval in milliseconds
      * @default 300000 (5 minutes)
      */
-    defaultInterval: parseInt(
-        process.env.NEXT_PUBLIC_SYNC_INTERVAL || "300000",
-        10,
-    ),
+    defaultInterval: publicEnv.NEXT_PUBLIC_SYNC_INTERVAL ?? 300000,
 
     /**
      * Minimum time between syncs in milliseconds
      * @default 60000 (1 minute)
      */
-    minInterval: parseInt(
-        process.env.NEXT_PUBLIC_MIN_SYNC_INTERVAL || "60000",
-        10,
-    ),
+    minInterval: publicEnv.NEXT_PUBLIC_MIN_SYNC_INTERVAL ?? 60000,
 
     /**
      * Whether to sync on mount
      * @default true
      */
-    syncOnMount: process.env.NEXT_PUBLIC_SYNC_ON_MOUNT !== "false",
+    syncOnMount: publicEnv.NEXT_PUBLIC_SYNC_ON_MOUNT,
 
     /**
      * Whether to sync when tab becomes visible
      * @default true
      */
-    syncOnVisibilityChange:
-        process.env.NEXT_PUBLIC_SYNC_ON_VISIBILITY !== "false",
+    syncOnVisibilityChange: publicEnv.NEXT_PUBLIC_SYNC_ON_VISIBILITY,
 
     /**
      * Available sync interval presets (in milliseconds)

@@ -5,9 +5,6 @@ export function cn(...inputs: ClassValue[]) {
     return twMerge(clsx(inputs));
 }
 
-export const isBuild = process.env.NEXT_PHASE === "phase-production-build";
-export const isDev = process.env.NODE_ENV === "development";
-
 const AUDIO_MIME_TYPES: Record<string, string> = {
     ".mp3": "audio/mpeg",
     ".mp4": "audio/mp4",
@@ -44,10 +41,3 @@ export function audioFilenameWithExt(storagePath: string): string {
     return "audio.mp3";
 }
 
-export function absoluteUrl(path: string) {
-    if (typeof window !== "undefined") {
-        return `${window.location.origin}${path}`;
-    }
-    const { env } = require("@/lib/env");
-    return `${env.APP_URL}${path}`;
-}

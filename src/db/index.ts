@@ -1,7 +1,6 @@
 import { drizzle } from "drizzle-orm/postgres-js";
 import postgres from "postgres";
-import { env } from "@/lib/env";
-import { isBuild } from "@/lib/utils";
+import { env, isBuild } from "@/lib/env";
 import * as schema from "./schema";
 
 if (!env.DATABASE_URL && !isBuild) {
