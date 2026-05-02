@@ -1,6 +1,17 @@
 import { NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { plaudSendCode } from "@/lib/plaud/auth";
+import { RateLimiter } from "@/lib/rate-limit";
+
+/**
+ * Plaud's OTP endpoint sends an email/SMS, so an authenticated abuser
+ * could spam recipients. 5 sends per (user, email) per 15 min is enough
+ * for a legitimate retry+region-redirect path and stops abuse.
+ */
+const sendCodeLimiter = new RateLimiter({
+    windowMs: 15 * 60 * 1000,
+    max: 5,
+});
 
 /**
  * POST /api/plaud/auth/send-code
@@ -29,6 +40,22 @@ export async function POST(request: Request) {
             return NextResponse.json(
                 { error: "Email is required" },
                 { status: 400 },
+            );
+        }
+
+        const normalizedEmail = email.trim().toLowerCase();
+        const limit = sendCodeLimiter.check(
+            `${session.user.id}:${normalizedEmail}`,
+        );
+        if (!limit.allowed) {
+            return NextResponse.json(
+                { error: "Too many code requests. Please try again later." },
+                {
+                    status: 429,
+                    headers: {
+                        "Retry-After": String(limit.retryAfterSec ?? 60),
+                    },
+                },
             );
         }
 

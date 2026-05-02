@@ -14,6 +14,19 @@ export const auth = betterAuth({
         enabled: true,
         requireEmailVerification: false,
     },
+    // In-memory token bucket per IP+path (stricter on the sign-in path
+    // since password guessing is the obvious abuse vector). Self-hosted
+    // single-instance only — multi-instance deployments need a shared
+    // store; out of scope for now.
+    rateLimit: {
+        enabled: true,
+        window: 60,
+        max: 30,
+        customRules: {
+            "/sign-in/email": { window: 60, max: 5 },
+            "/sign-up/email": { window: 60, max: 5 },
+        },
+    },
     secret: env.BETTER_AUTH_SECRET,
     baseURL: env.APP_URL,
 });
