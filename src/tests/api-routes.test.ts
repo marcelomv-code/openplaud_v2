@@ -40,7 +40,15 @@ function selectChain(rowsOrThunk: Row[] | (() => Promise<Row[]>)) {
             ? rowsOrThunk()
             : Promise.resolve(rowsOrThunk);
     const limit = vi.fn(() => settle());
-    const orderBy = vi.fn(() => settle());
+    // .orderBy() may be the terminal OR may chain into .limit(). Support
+    // both by returning a thenable that also exposes .limit.
+    const orderBy = vi.fn(() => ({
+        limit,
+        then: (
+            resolve: (rows: Row[]) => unknown,
+            reject?: (err: unknown) => unknown,
+        ) => settle().then(resolve, reject),
+    }));
     // .where(...) must itself be thenable for queries that don't chain
     // .limit/.orderBy after it.
     const where = vi.fn(() => ({
@@ -99,6 +107,70 @@ describe("API routes — smoke", () => {
             const body = await res.json();
             expect(body.recordings).toHaveLength(2);
             expect(body.recordings[0].userId).toBe("user-A");
+        });
+
+        it("returns nextCursor=null and full page when fewer than limit rows exist", async () => {
+            getSessionMock.mockResolvedValueOnce(userA);
+            (db.select as Mock).mockReturnValueOnce(
+                selectChain([
+                    {
+                        id: "rec-1",
+                        userId: "user-A",
+                        filename: "a.mp3",
+                        startTime: new Date("2026-04-01T00:00:00Z"),
+                    },
+                    {
+                        id: "rec-2",
+                        userId: "user-A",
+                        filename: "b.mp3",
+                        startTime: new Date("2026-03-31T00:00:00Z"),
+                    },
+                ]),
+            );
+
+            const res = await recordingsListGET(
+                new Request("https://openplaud.test/api/recordings"),
+            );
+
+            expect(res.status).toBe(200);
+            const body = await res.json();
+            expect(body.recordings).toHaveLength(2);
+            expect(body.nextCursor).toBeNull();
+        });
+
+        it("returns nextCursor=last startTime when limit+1 rows are returned", async () => {
+            getSessionMock.mockResolvedValueOnce(userA);
+            // 3 rows for limit=2 → hasMore=true, page=first 2, cursor=2nd row
+            (db.select as Mock).mockReturnValueOnce(
+                selectChain([
+                    {
+                        id: "rec-1",
+                        userId: "user-A",
+                        filename: "a.mp3",
+                        startTime: new Date("2026-04-01T00:00:00Z"),
+                    },
+                    {
+                        id: "rec-2",
+                        userId: "user-A",
+                        filename: "b.mp3",
+                        startTime: new Date("2026-03-31T12:00:00Z"),
+                    },
+                    {
+                        id: "rec-3",
+                        userId: "user-A",
+                        filename: "c.mp3",
+                        startTime: new Date("2026-03-30T00:00:00Z"),
+                    },
+                ]),
+            );
+
+            const res = await recordingsListGET(
+                new Request("https://openplaud.test/api/recordings?limit=2"),
+            );
+
+            const body = await res.json();
+            expect(body.recordings).toHaveLength(2);
+            expect(body.nextCursor).toBe("2026-03-31T12:00:00.000Z");
         });
 
         it("returns 500 on DB error and does not leak details", async () => {
