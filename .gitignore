@@ -32,6 +32,11 @@ yarn-error.log*
 *.log
 logs.txt
 
+# alternative lockfiles (pnpm-lock.yaml is canonical per AGENTS.md and CI)
+bun.lock
+yarn.lock
+package-lock.json
+
 # env files
 .env
 .env*.local
