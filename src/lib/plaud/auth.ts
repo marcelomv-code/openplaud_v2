@@ -61,7 +61,20 @@ export async function plaudSendCode(
 }> {
     const res = await fetch(`${apiBase}/auth/otp-send-code`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+            "Content-Type": "application/json",
+            // Plaud's OTP backend appears to scope user identity by client
+            // platform. Authenticating without App-Platform: web maps the
+            // email to a *different* user namespace from the one used by
+            // app.plaud.ai (Plaud creates a fresh "web-shaped" account on
+            // first such login, which has no devices and no recordings).
+            // Sending the same client identifiers Plaud Web sends puts us
+            // in the same namespace and resolves to the user's real account.
+            "App-Platform": "web",
+            "App-Language": "en",
+            Origin: "https://web.plaud.ai",
+            Referer: "https://web.plaud.ai/",
+        },
         body: JSON.stringify({ username: email }),
     });
 
@@ -97,7 +110,16 @@ export async function plaudVerifyOtp(
 }> {
     const res = await fetch(`${apiBase}/auth/otp-login`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+            "Content-Type": "application/json",
+            // Same client-platform scoping as plaudSendCode — must match
+            // here too, otherwise the OTP we received in the "web"
+            // namespace won't validate.
+            "App-Platform": "web",
+            "App-Language": "en",
+            Origin: "https://web.plaud.ai",
+            Referer: "https://web.plaud.ai/",
+        },
         body: JSON.stringify({ code, token: otpToken }),
     });
 

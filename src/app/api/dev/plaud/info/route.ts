@@ -3,8 +3,13 @@ import { NextResponse } from "next/server";
 import { db } from "@/db";
 import { plaudConnections } from "@/db/schema";
 import { auth } from "@/lib/auth";
+import { decrypt } from "@/lib/encryption";
 import { createPlaudClient } from "@/lib/plaud/client-factory";
 import { serverKeyFromApiBase } from "@/lib/plaud/servers";
+import {
+    listPlaudWorkspaces,
+    mintPlaudWorkspaceToken,
+} from "@/lib/plaud/workspace";
 
 /**
  * Dev-only introspection endpoint.
@@ -69,11 +74,60 @@ export async function GET(request: Request) {
 
         const latencyMs = Date.now() - startedAt;
 
+        // Diagnostic-only: list all workspaces visible to the UT, and probe
+        // mint-token success per workspace. Helps debug "wrong workspace
+        // picked" cases. Decrypts the bearer here and never returns it.
+        let workspacesDiagnostic: unknown = null;
+        try {
+            const userToken = decrypt(connection.bearerToken);
+            const list = await listPlaudWorkspaces(
+                userToken,
+                connection.apiBase,
+            );
+            const workspaces = list.data?.workspaces ?? [];
+            workspacesDiagnostic = await Promise.all(
+                workspaces.map(async (ws) => {
+                    let mintOk = false;
+                    let mintError: string | null = null;
+                    try {
+                        await mintPlaudWorkspaceToken(
+                            userToken,
+                            ws.workspace_id,
+                            connection.apiBase,
+                        );
+                        mintOk = true;
+                    } catch (err) {
+                        mintError =
+                            err instanceof Error ? err.message : String(err);
+                    }
+                    return {
+                        workspaceId: ws.workspace_id,
+                        memberId: ws.member_id,
+                        name: ws.name,
+                        role: ws.role,
+                        status: ws.status,
+                        workspaceType: ws.workspace_type,
+                        region: ws.region,
+                        apiDomain: ws.api_domain,
+                        createdAt: ws.created_at,
+                        creatorUserId: ws.creator_user_id,
+                        mintOk,
+                        mintError,
+                    };
+                }),
+            );
+        } catch (err) {
+            workspacesDiagnostic = {
+                error: err instanceof Error ? err.message : String(err),
+            };
+        }
+
         return NextResponse.json({
             connected: true,
             reachable,
             latencyMs,
             error: errorMessage,
+            workspaces: workspacesDiagnostic,
             connection: {
                 id: connection.id,
                 apiBase: connection.apiBase,
