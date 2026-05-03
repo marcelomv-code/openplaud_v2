@@ -137,12 +137,21 @@ export class PlaudClient {
         const url = `${this.apiBase}${endpoint}`;
 
         try {
+            // Plaud's API silently returns empty lists from /file/simple/web
+            // and /device/list when the request looks like it didn't come from
+            // their official Web client. Mimic the headers the Web app sends
+            // so the API returns full data. /filetag/ tolerates their absence,
+            // which is what masked this for so long. See request capture in
+            // memory/reference_plaud_api.md.
             const response = await fetch(url, {
                 ...options,
                 headers: {
                     ...options?.headers,
                     Authorization: `Bearer ${bearer}`,
                     "Content-Type": "application/json",
+                    "App-Platform": "web",
+                    "App-Language": "en",
+                    "Edit-From": "web",
                 },
             });
 
