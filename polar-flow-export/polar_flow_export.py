@@ -34,9 +34,20 @@ OPCOES PRINCIPAIS
     --format FMT         tcx (padrao), gpx ou csv
     --overwrite          Rebaixa arquivos que ja existem localmente
     --delay SEGUNDOS     Pausa entre downloads (padrao: 1.0)
+    --user-agent STR     User-Agent personalizado (raramente necessario)
+    --cookie STR         Pula o login e usa cookies de uma sessao ja aberta
+                         no navegador. Formato: "KEY=VAL; KEY2=VAL2"
+    --debug             Mostra detalhes HTTP em caso de falha de login
 
 O script pode ser interrompido e reexecutado: por padrao ele pula treinos ja
 baixados, entao da pra retomar de onde parou.
+
+------------------------------------------------------------------------------
+SE O LOGIN FALHAR (HTTP 403 / nao autentica)
+------------------------------------------------------------------------------
+O Polar tem protecao anti-bot. Se o login com usuario/senha falhar, use o modo
+cookie: abra flow.polar.com no navegador (ja logado), copie os cookies do site
+e rode com --cookie "..." (veja instrucoes detalhadas no final deste arquivo).
 """
 
 from __future__ import annotations
@@ -63,15 +74,21 @@ BASE_URL = "https://flow.polar.com"
 LOGIN_PAGE_URL = f"{BASE_URL}/"
 LOGIN_POST_URL = f"{BASE_URL}/login"
 CALENDAR_URL = f"{BASE_URL}/training/getCalendarEvents"
-EXPORT_URL = f"{BASE_URL}/api/export/training/{{fmt}}/{{training_id}}"
 
 # Eventos do calendario que representam um treino baixavel.
 EXERCISE_TYPES = {"EXERCISE", "TRAINING_SESSION", "FITNESS_TEST"}
 
-USER_AGENT = (
-    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
-    "(KHTML, like Gecko) Chrome/124.0 Safari/537.36"
-)
+# Um User-Agent honesto (nao fingir ser um navegador) evita a regra anti-bot
+# que bloqueia "Chrome falso" vindo de scripts. Foi assim que as ferramentas
+# de exportacao da comunidade conseguiram passar pelo 403.
+DEFAULT_USER_AGENT = "polar-flow-export/2.0 (personal data export)"
+
+DEBUG = False
+
+
+def dbg(*args) -> None:
+    if DEBUG:
+        print("[debug]", *args, file=sys.stderr)
 
 
 # --------------------------------------------------------------------------- #
@@ -108,55 +125,64 @@ def parse_cli_date(s: str) -> date:
 
 
 # --------------------------------------------------------------------------- #
-# Autenticacao
+# Sessao / Autenticacao
 # --------------------------------------------------------------------------- #
-def build_session() -> requests.Session:
+def build_session(user_agent: str, cookie: str | None) -> requests.Session:
     session = requests.Session()
-    session.headers.update({"User-Agent": USER_AGENT})
+    session.headers.update({"User-Agent": user_agent})
+    if cookie:
+        for part in cookie.split(";"):
+            part = part.strip()
+            if "=" in part:
+                key, value = part.split("=", 1)
+                session.cookies.set(key.strip(), value.strip(), domain="flow.polar.com")
     return session
-
-
-def find_csrf_token(html: str) -> str | None:
-    """Tenta extrair um token CSRF da pagina de login, se existir."""
-    for pattern in (
-        r'name="csrfToken"\s+value="([^"]+)"',
-        r'name="_csrf"\s+value="([^"]+)"',
-        r'"csrfToken"\s*:\s*"([^"]+)"',
-    ):
-        m = re.search(pattern, html)
-        if m:
-            return m.group(1)
-    return None
 
 
 def login(session: requests.Session, username: str, password: str) -> None:
     """Autentica na conta do Polar Flow. Lanca RuntimeError em caso de falha."""
-    page = session.get(LOGIN_PAGE_URL, timeout=30)
-    payload = {"email": username, "password": password}
-    token = find_csrf_token(page.text)
-    if token:
-        payload["csrfToken"] = token
+    # GET inicial: estabelece cookies de sessao antes do POST.
+    try:
+        session.get(LOGIN_PAGE_URL, timeout=30)
+    except requests.RequestException as exc:
+        dbg("GET inicial falhou (seguindo mesmo assim):", exc)
 
+    # Campos identicos aos das ferramentas que funcionam (sem CSRF).
+    payload = {
+        "returnUrl": "https://flow.polar.com/",
+        "email": username,
+        "password": password,
+    }
     resp = session.post(
         LOGIN_POST_URL,
         data=payload,
-        headers={"Referer": LOGIN_PAGE_URL},
+        headers={
+            "Referer": LOGIN_PAGE_URL,
+            "Origin": BASE_URL,
+        },
         timeout=30,
     )
+    dbg("POST /login ->", resp.status_code, "| url final:", resp.url)
 
+    if resp.status_code == 403:
+        if DEBUG:
+            dbg("corpo (inicio):", resp.text[:300])
+        raise RuntimeError(
+            "Login bloqueado pelo Polar (HTTP 403). Isso costuma ser protecao "
+            "anti-bot, NAO senha errada.\n"
+            "Solucao recomendada: use o modo --cookie (instrucoes no fim do "
+            "arquivo polar_flow_export.py ou peca ajuda)."
+        )
     if resp.status_code >= 400:
         raise RuntimeError(
-            f"Login retornou HTTP {resp.status_code}. "
-            "Verifique usuario/senha."
+            f"Login retornou HTTP {resp.status_code}. Verifique usuario/senha."
         )
 
-    # Verificacao real: pedir o calendario de um dia. Se a sessao nao estiver
-    # autenticada, o Polar devolve HTML de login no lugar de JSON.
     if not _is_logged_in(session):
         raise RuntimeError(
             "Nao foi possivel autenticar. Confira o e-mail e a senha. "
-            "Se voce usa login social (Google/Apple) ou 2FA, sera preciso "
-            "uma senha de conta Polar tradicional para este metodo."
+            "Se voce usa login social (Google/Apple) ou 2FA, use o modo "
+            "--cookie em vez de usuario/senha."
         )
 
 
@@ -168,9 +194,11 @@ def _is_logged_in(session: requests.Session) -> bool:
             params={"start": fmt_api_date(today), "end": fmt_api_date(today)},
             timeout=30,
         )
+        dbg("verificacao getCalendarEvents ->", resp.status_code)
         resp.json()
         return True
-    except (ValueError, requests.RequestException):
+    except (ValueError, requests.RequestException) as exc:
+        dbg("verificacao falhou:", exc)
         return False
 
 
@@ -202,6 +230,21 @@ def safe_slug(value: str) -> str:
     return value or "treino"
 
 
+def event_training_id(event: dict):
+    return event.get("listItemId") or event.get("id")
+
+
+def event_export_url(event: dict, fmt: str) -> str:
+    """Monta a URL de exportacao a partir da URL de analise do treino.
+
+    Ex.: https://flow.polar.com/training/analysis/123456/export/tcx/false
+    """
+    rel = (event.get("url") or "").strip("/")
+    if not rel:
+        rel = f"training/analysis/{event_training_id(event)}"
+    return f"{BASE_URL}/{rel}/export/{fmt}/false"
+
+
 def build_filename(event: dict, ext: str) -> str:
     raw = str(event.get("datetime", "")).strip()
     stamp = None
@@ -213,8 +256,7 @@ def build_filename(event: dict, ext: str) -> str:
             continue
     when = stamp.strftime("%Y-%m-%d_%H%M%S") if stamp else "sem-data"
     sport = safe_slug(str(event.get("iconType") or event.get("sport") or "treino"))
-    training_id = event.get("listItemId") or event.get("id")
-    return f"{when}_{sport}_{training_id}.{ext}"
+    return f"{when}_{sport}_{event_training_id(event)}.{ext}"
 
 
 def download_training(
@@ -226,7 +268,7 @@ def download_training(
     delay: float,
 ) -> str:
     """Baixa um treino. Retorna 'ok', 'skip' ou 'fail'."""
-    training_id = event.get("listItemId") or event.get("id")
+    training_id = event_training_id(event)
     if not training_id:
         return "fail"
 
@@ -235,7 +277,7 @@ def download_training(
     if os.path.exists(path) and not overwrite:
         return "skip"
 
-    url = EXPORT_URL.format(fmt=fmt, training_id=training_id)
+    url = event_export_url(event, fmt)
     try:
         resp = session.get(url, timeout=120)
         resp.raise_for_status()
@@ -278,6 +320,12 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     )
     parser.add_argument("--overwrite", action="store_true", help="Rebaixa arquivos existentes")
     parser.add_argument("--delay", type=float, default=1.0, help="Pausa entre downloads (s)")
+    parser.add_argument("--user-agent", default=DEFAULT_USER_AGENT, help="User-Agent personalizado")
+    parser.add_argument(
+        "--cookie",
+        help='Pula login e usa cookies do navegador. Ex.: "JSESSIONID=...; AWSALB=..."',
+    )
+    parser.add_argument("--debug", action="store_true", help="Mostra detalhes HTTP")
     return parser.parse_args(argv)
 
 
@@ -305,22 +353,34 @@ def resolve_date_range(args: argparse.Namespace) -> tuple[date, date]:
 
 
 def main(argv: list[str]) -> int:
+    global DEBUG
     args = parse_args(argv)
+    DEBUG = args.debug
     start, end = resolve_date_range(args)
-    username, password = resolve_credentials(args)
 
     os.makedirs(args.output, exist_ok=True)
 
     print(f"Intervalo: {start.isoformat()} -> {end.isoformat()}")
     print(f"Formato:   {args.format}")
     print(f"Destino:   {os.path.abspath(args.output)}")
-    print("Autenticando no Polar Flow...")
 
-    session = build_session()
-    try:
-        login(session, username, password)
-    except RuntimeError as exc:
-        sys.exit(str(exc))
+    session = build_session(args.user_agent, args.cookie)
+
+    if args.cookie:
+        print("Usando cookies fornecidos (pulando login)...")
+        if not _is_logged_in(session):
+            sys.exit(
+                "Os cookies fornecidos nao autenticam (expirados ou incompletos).\n"
+                "Abra flow.polar.com no navegador, faca login e copie os cookies "
+                "novamente."
+            )
+    else:
+        username, password = resolve_credentials(args)
+        print("Autenticando no Polar Flow...")
+        try:
+            login(session, username, password)
+        except RuntimeError as exc:
+            sys.exit(str(exc))
     print("Autenticado com sucesso.\n")
 
     totals = {"ok": 0, "skip": 0, "fail": 0}
@@ -338,7 +398,7 @@ def main(argv: list[str]) -> int:
         print(f"[{label}] {len(exercises)} treino(s)")
 
         for event in exercises:
-            tid = event.get("listItemId") or event.get("id")
+            tid = event_training_id(event)
             if tid in seen:
                 continue
             seen.add(tid)
@@ -358,3 +418,19 @@ def main(argv: list[str]) -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main(sys.argv[1:]))
+
+
+# ===========================================================================
+# COMO USAR O MODO --cookie (quando o login com senha da HTTP 403)
+# ===========================================================================
+# 1. No celular ou PC, abra https://flow.polar.com e faca login normalmente.
+# 2. Pegue os cookies do site flow.polar.com. No PC e mais facil:
+#       - Chrome/Edge: F12 -> aba "Application" -> Cookies -> flow.polar.com
+#       - Copie os pares NOME=VALOR (os importantes costumam ser
+#         JSESSIONID e os que comecam com AWSALB).
+# 3. Rode:
+#       python3 polar_flow_export.py \
+#           --cookie "JSESSIONID=xxxx; AWSALB=yyyy; AWSALBCORS=zzzz" \
+#           --output ./treinos
+#    (nao precisa de usuario/senha nesse modo)
+# ===========================================================================
