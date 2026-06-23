@@ -10,6 +10,11 @@ concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 
+# Least privilege: CI only reads the repo. Narrowing the default token
+# limits blast radius if a build step is ever compromised.
+permissions:
+  contents: read
+
 jobs:
   lint:
     name: Lint & Format

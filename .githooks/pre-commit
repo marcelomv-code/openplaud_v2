@@ -1,0 +1,97 @@
+#!/usr/bin/env bash
+#
+# OpenPlaud pre-commit secret guard (dependency-free).
+#
+# Enabled automatically by the "prepare" script in package.json
+#   (git config core.hooksPath .githooks)
+# or manually with:
+#   git config core.hooksPath .githooks
+#
+# Goal: stop the most common ways secrets get committed BEFORE they leave
+# the machine. This is a best-effort local gate; the authoritative check is
+# the Gitleaks CI workflow. If gitleaks is installed locally, we use it too.
+#
+# Bypass (use only when you are certain it is a false positive):
+#   git commit --no-verify
+
+set -euo pipefail
+
+red()  { printf '\033[31m%s\033[0m\n' "$1"; }
+ylw()  { printf '\033[33m%s\033[0m\n' "$1"; }
+grn()  { printf '\033[32m%s\033[0m\n' "$1"; }
+
+fail=0
+
+# Files staged for this commit (added/copied/modified, not deleted).
+staged="$(git diff --cached --name-only --diff-filter=ACM)"
+
+if [ -z "$staged" ]; then
+  exit 0
+fi
+
+# ---------------------------------------------------------------------------
+# 1) Block committing real env / secret files outright.
+#    Templates (*.example, *.sample) are allowed.
+# ---------------------------------------------------------------------------
+while IFS= read -r f; do
+  [ -z "$f" ] && continue
+  case "$f" in
+    *.example|*.sample) continue ;;
+  esac
+  case "$f" in
+    .env|.env.*|*/.env|*/.env.*|*.pem|*.key|*.p12|*.pfx|*.keystore|*.jks|id_rsa|id_dsa|id_ecdsa|id_ed25519|*.ppk)
+      red "✖ Refusing to commit a secret-bearing file: $f"
+      red "  Env/key files must not be committed. Use .env.example for templates."
+      fail=1
+      ;;
+  esac
+done <<EOF
+$staged
+EOF
+
+# ---------------------------------------------------------------------------
+# 2) Content scan of the staged diff for high-signal secret patterns.
+#    Lines containing the marker "pragma: allowlist secret" are skipped.
+# ---------------------------------------------------------------------------
+# Build a single patch of added lines only.
+added="$(git diff --cached --no-color -U0 -- $staged 2>/dev/null | grep -E '^\+' | grep -vE '^\+\+\+' || true)"
+
+if [ -n "$added" ]; then
+  # Patterns are intentionally conservative to limit false positives.
+  patterns='-----BEGIN [A-Z ]*PRIVATE KEY-----|AKIA[0-9A-Z]{16}|ASIA[0-9A-Z]{16}|AIza[0-9A-Za-z_\-]{35}|gh[pousr]_[0-9A-Za-z]{36,}|github_pat_[0-9A-Za-z_]{60,}|xox[baprs]-[0-9A-Za-z-]{10,}|sk-[A-Za-z0-9]{20,}|sk-ant-[A-Za-z0-9_-]{20,}|eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}|(secret|password|passwd|token|api[_-]?key|access[_-]?key)["'"'"']?\s*[:=]\s*["'"'"'][^"'"'"']{8,}'
+
+  hits="$(printf '%s\n' "$added" \
+    | grep -viE 'pragma: allowlist secret' \
+    | grep -inE -- "$patterns" || true)"
+
+  # Drop matches that are clearly documented placeholders.
+  hits="$(printf '%s\n' "$hits" \
+    | grep -viE 'your-(secret|64-char)|dummy-secret-for-build|example\.com|user:password@localhost|postgres:postgres@localhost|0{64}|changeme|<[a-z_]+>|xxx+' || true)"
+
+  if [ -n "$hits" ]; then
+    red "✖ Potential secret(s) detected in staged changes:"
+    printf '%s\n' "$hits" | sed 's/^/    /'
+    ylw "  If this is a real credential: remove it, use an env var, and rotate it."
+    ylw "  If it is a false positive: append  # pragma: allowlist secret  to the line,"
+    ylw "  or commit with --no-verify (discouraged)."
+    fail=1
+  fi
+fi
+
+# ---------------------------------------------------------------------------
+# 3) If gitleaks is installed locally, run it on staged changes too.
+# ---------------------------------------------------------------------------
+if command -v gitleaks >/dev/null 2>&1; then
+  if ! gitleaks protect --staged --redact --config .gitleaks.toml >/dev/null 2>&1; then
+    red "✖ gitleaks flagged staged changes. Run: gitleaks protect --staged --verbose"
+    fail=1
+  fi
+fi
+
+if [ "$fail" -ne 0 ]; then
+  red "Commit blocked by pre-commit secret guard."
+  exit 1
+fi
+
+grn "✓ pre-commit secret guard passed"
+exit 0

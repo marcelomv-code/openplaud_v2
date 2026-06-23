@@ -32,11 +32,33 @@ yarn-error.log*
 
 # env files
 .env
+.env.*
 .env*.local
 .env.local
 .env.development.local
 .env.test.local
 .env.production.local
+# keep the template tracked
+!.env.example
+
+# secrets & credentials (never commit these)
+*.key
+*.p12
+*.pfx
+*.keystore
+*.jks
+*.crt
+*.cer
+id_rsa
+id_dsa
+id_ecdsa
+id_ed25519
+*.ppk
+*secret*.json
+*credentials*.json
+gha-creds-*.json
+.secrets
+secrets/
 
 # vercel
 .vercel

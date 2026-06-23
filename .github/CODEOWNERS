@@ -1,0 +1,18 @@
+# Code owners for OpenPlaud.
+#
+# Owners are requested for review automatically on matching PRs. To make this
+# binding, enable branch protection on `main` with "Require review from Code
+# Owners". Security-sensitive paths are called out explicitly so changes to
+# auth, crypto, CI, and secret-handling always get a second pair of eyes.
+
+# Default owner for everything.
+*                           @marcelomv-code
+
+# Security-sensitive surfaces.
+/.github/                   @marcelomv-code
+/.githooks/                 @marcelomv-code
+/.gitleaks.toml             @marcelomv-code
+/.env.example               @marcelomv-code
+/Dockerfile                 @marcelomv-code
+/docker-entrypoint.sh       @marcelomv-code
+/drizzle.config.ts          @marcelomv-code

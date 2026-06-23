@@ -36,7 +36,8 @@
         "db:generate": "drizzle-kit generate",
         "db:migrate": "bun src/db/migrate.ts",
         "db:studio": "drizzle-kit studio",
-        "release": "bun scripts/release.ts"
+        "release": "bun scripts/release.ts",
+        "prepare": "git config core.hooksPath .githooks || true"
     },
     "dependencies": {
         "@aws-sdk/client-s3": "^3.937.0",
